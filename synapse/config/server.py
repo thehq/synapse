@@ -228,7 +228,10 @@ class ServerConfig(Config):
             "show_users_in_user_directory", True,
         )
 
-        retention_config = config.get("retention")
+        retention_config = config.get("retention", {})
+
+        self.retention_enabled = retention_config.get("enabled", False)
+
         self.retention_max_lifetime = self.parse_duration(
             retention_config.get("max_lifetime", 0),
         )
@@ -242,7 +245,6 @@ class ServerConfig(Config):
             )
 
         self.retention_purge_jobs = []
-        # TODO: Document better the job config.
         for purge_job_config in retention_config.get("purge_jobs", []):
             interval_config = purge_job_config.get("interval", None)
 
@@ -744,20 +746,43 @@ class ServerConfig(Config):
         #
         # Room admins and mods can define a retention period for their rooms using the
         # 'im.vector.room.retention' state event, and server admins can cap this period
-        # by setting the 'min_lifetime' and 'max_lifetime' config options.
+        # by setting the 'min_lifetime' and 'max_lifetime' config options. This feature is
+        # disabled by default.
+        #
+        # If this feature is enabled, Synapse will regularly look for and purge events
+        # which are older than the room's maximum retention period. Synapse will also
+        # filter events received over federation so that events that should have been
+        # purged are ignored and not stored again.
+        #
+        # Rooms that lack the 'im.vector.room.retention' state event will be considered as
+        # if their maximum retention period is equal to the 'max_lifetime' parameter from
+        # the server's configuration.
         #
         # Server admins can also define the settings of the background jobs purging the
         # events which lifetime has expired under the 'purge_jobs' section.
-        # If no configuration is provided, a single job will be setup to delete all
-        # expired events daily.
+        # If no configuration is provided, a single job will be setup to delete expired
+        # events in every room daily.
+        # Each job's configuration defines which range of message lifetime the job takes
+        # care of. For example, if 'min_lifetime' is '2d' and 'max_lifetime' is '3d', the
+        # job will handle purging expired events in rooms which state defines a
+        # 'max_lifetime' that's between 2 and 3 days.
+        #
+        # The rationale for this per-job configuration is that server admins might want to
+        # run the purge job at a low interval for rooms with low 'max_lifetime', but want
+        # to increase the interval for rooms with higher 'max_lifetime' in order to ease
+        # Synapse's load.
         #
         #retention:
+        #  enabled: True
         #  min_lifetime: 1d
         #  max_lifetime: 1y
         #  purge_jobs:
-        #    - min_lifetime: 2d
+        #    - min_lifetime: 1d
         #      max_lifetime: 3d
         #      interval: 12h
+        #    - min_lifetime: 3d
+        #      max_lifetime: 1y
+        #      interval: 24h
         """ % locals()
 
     def read_arguments(self, args):

@@ -81,13 +81,14 @@ class PaginationHandler(object):
         self._purges_by_id = {}
         self._event_serializer = hs.get_event_client_serializer()
 
-        # Run the purge jobs described in the configuration file.
-        for job in self.config.retention_purge_jobs:
-            self.clock.looping_call(
-                self.purge_history_for_rooms_in_range,
-                job["interval"],
-                job["min_lifetime"], job["max_lifetime"],
-            )
+        if self.config.retention_enabled:
+            # Run the purge jobs described in the configuration file.
+            for job in self.config.retention_purge_jobs:
+                self.clock.looping_call(
+                    self.purge_history_for_rooms_in_range,
+                    job["interval"],
+                    job["min_lifetime"], job["max_lifetime"],
+                )
 
     @defer.inlineCallbacks
     def purge_history_for_rooms_in_range(self, min_s, max_s):
