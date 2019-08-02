@@ -232,12 +232,15 @@ class ServerConfig(Config):
 
         self.retention_enabled = retention_config.get("enabled", False)
 
-        self.retention_max_lifetime = self.parse_duration(
-            retention_config.get("max_lifetime", 0),
-        )
-        self.retention_min_lifetime = self.parse_duration(
-            retention_config.get("min_lifetime", 0),
-        )
+        # MSC1763 mandates that lifetimes are expressed in seconds, while parse_duration
+        # returns milliseconds, so we need to convert it everytime.
+        self.retention_max_lifetime = int(self.parse_duration(
+            retention_config.get("max_lifetime", 0)
+        ) / 1000)
+
+        self.retention_min_lifetime = int(self.parse_duration(
+            retention_config.get("min_lifetime", 0)
+        ) / 1000)
 
         if self.retention_min_lifetime > self.retention_max_lifetime:
             raise ConfigError(
@@ -258,13 +261,13 @@ class ServerConfig(Config):
 
             interval = self.parse_duration(interval_config)
 
-            min_lifetime = self.parse_duration(
-                purge_job_config.get("min_lifetime", self.retention_min_lifetime),
-            )
+            min_lifetime = int(self.parse_duration(
+                purge_job_config.get("min_lifetime", self.retention_min_lifetime * 1000)
+            ) / 1000)
 
-            max_lifetime = self.parse_duration(
-                purge_job_config.get("max_lifetime", self.retention_max_lifetime),
-            )
+            max_lifetime = int(self.parse_duration(
+                purge_job_config.get("max_lifetime", self.retention_max_lifetime * 1000)
+            ) / 1000)
 
             if min_lifetime < self.retention_min_lifetime:
                 raise ConfigError(
@@ -292,8 +295,8 @@ class ServerConfig(Config):
 
             self.retention_purge_jobs.append({
                 "interval": interval,
-                "min_lifetime": min_lifetime,
-                "max_lifetime": max_lifetime,
+                "min_lifetime": int(min_lifetime / 1000),
+                "max_lifetime": int(max_lifetime / 1000),
             })
 
         if not self.retention_purge_jobs:
