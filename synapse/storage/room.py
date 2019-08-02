@@ -226,6 +226,8 @@ class RoomStore(RoomWorkerStore, SearchStore):
     def __init__(self, db_conn, hs):
         super(RoomStore, self).__init__(db_conn, hs)
 
+        self.config = hs.config
+
         self.register_background_update_handler(
             "users_set_deactivated_flag", self._background_insert_retention,
         )
@@ -735,38 +737,29 @@ class RoomStore(RoomWorkerStore, SearchStore):
         return local_media_mxcs, remote_media_mxcs
 
     @defer.inlineCallbacks
-    def get_retention_periods_for_rooms(self):
+    def get_rooms_for_retention_period_in_range(self, min_s, max_s, include_null=False):
 
-        def get_retention_periods_for_rooms_txn(txn):
+        def get_rooms_for_retention_period_in_range_txn(txn):
             sql = (
-                "SELECT s.room_id, e.json FROM current_state_events AS s"
-                " LEFT JOIN event_json AS e ON (s.event_id = e.event_id)"
-                " WHERE s.type = 'im.vector.retention'"
+                "SELECT room_id, min_lifetime, max_lifetime FROM room_retention"
+                " WHERE ("
+                "   max_lifetime > ?"
+                "   AND max_lifetime <= ?"
+                " )"
             )
 
-            txn.execute(sql)
+            if include_null:
+                sql += " OR max_lifetime IS NULL"
+
+            txn.execute(sql, (min_s, max_s))
 
             rows = self.cursor_to_dict(txn)
 
-            rooms = []
+            return rows
 
-            for row in rows:
-                eventJSON = json.loads(row["json"])
-
-                # Ignore invalid events.
-                if "max_lifetime" not in eventJSON.get("content", {}):
-                    continue
-
-                rooms.append({
-                    "room_id": row["room_id"],
-                    "max_lifetime": eventJSON["content"]["max_lifetime"],
-                })
-
-            return rooms
-
-        retention_periods = yield self.runInteraction(
-            "get_rooms_for_retention_period_range",
-            get_retention_periods_for_rooms_txn,
+        rooms = yield self.runInteraction(
+            "get_rooms_for_retention_period_in_range",
+            get_rooms_for_retention_period_in_range_txn,
         )
 
-        defer.returnValue(retention_periods)
+        defer.returnValue(rooms)

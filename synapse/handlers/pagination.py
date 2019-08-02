@@ -92,49 +92,54 @@ class PaginationHandler(object):
 
     @defer.inlineCallbacks
     def purge_history_for_rooms_in_range(self, min_s, max_s):
-        retention_in_rooms = yield self.store.get_retention_periods_for_rooms()
+        # If a room lacks a max_lifetime, we consider it equal to one defined in the
+        # server's configuration, therefore we include these rooms if the server's
+        # config's max_lifetime is in the provided range.
+        include_null = (min_s < self.config.retention_max_lifetime <= max_s)
+        rooms = yield self.store.get_rooms_for_retention_period_in_range(
+            min_s, max_s, include_null
+        )
 
-        for room in retention_in_rooms:
-            if min_s <= room["max_lifetime"] <= max_s:
-                room_id = room["room_id"]
-                ts = self.clock.time_msec() - (room["max_lifetime"] * 1000)
+        for room in rooms:
+            room_id = room["room_id"]
+            ts = self.clock.time_msec() - (room["max_lifetime"] * 1000)
 
-                stream_ordering = (
-                    yield self.store.find_first_stream_ordering_after_ts(ts)
+            stream_ordering = (
+                yield self.store.find_first_stream_ordering_after_ts(ts)
+            )
+
+            r = (
+                yield self.store.get_room_event_after_stream_ordering(
+                    room_id, stream_ordering,
+                )
+            )
+            if not r:
+                logger.warning(
+                    "[purge] purging events not possible: No event found "
+                    "(ts %i => stream_ordering %i)",
+                    ts, stream_ordering,
                 )
 
-                r = (
-                    yield self.store.get_room_event_after_stream_ordering(
-                        room_id, stream_ordering,
-                    )
+            (stream, topo, _event_id) = r
+            token = "t%d-%d" % (topo, stream)
+
+            if room_id in self._purges_in_progress_by_room:
+                logger.warning(
+                    "[purge] not purging room %s as there's an ongoing purge running"
+                    " for this room",
+                    room_id,
                 )
-                if not r:
-                    logger.warning(
-                        "[purge] purging events not possible: No event found "
-                        "(ts %i => stream_ordering %i)",
-                        ts, stream_ordering,
-                    )
+                continue
 
-                (stream, topo, _event_id) = r
-                token = "t%d-%d" % (topo, stream)
+            purge_id = random_string(16)
 
-                if room_id in self._purges_in_progress_by_room:
-                    logger.warning(
-                        "[purge] not purging room %s as there's an ongoing purge running"
-                        " for this room",
-                        room_id,
-                    )
-                    continue
+            logger.info("Starting purging events in room %s", room_id)
 
-                purge_id = random_string(16)
-
-                logger.info("Starting purging events in room %s", room_id)
-
-                # We want to purge everything, including local events.
-                run_in_background(
-                    self._purge_history,
-                    purge_id, room_id, token, True,
-                )
+            # We want to purge everything, including local events.
+            run_in_background(
+                self._purge_history,
+                purge_id, room_id, token, True,
+            )
 
     def start_purge_history(self, room_id, token,
                             delete_local_events=False):
