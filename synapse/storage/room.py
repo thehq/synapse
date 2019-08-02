@@ -229,9 +229,10 @@ class RoomStore(RoomWorkerStore, SearchStore):
         self.config = hs.config
 
         self.register_background_update_handler(
-            "users_set_deactivated_flag", self._background_insert_retention,
+            "insert_room_retention", self._background_insert_retention,
         )
 
+    @defer.inlineCallbacks
     def _background_insert_retention(self, progress, batch_size):
         """Retrieves a list of all rooms within a range and inserts an entry for each of
         them into the room_retention table.
@@ -245,12 +246,15 @@ class RoomStore(RoomWorkerStore, SearchStore):
         def _background_insert_retention_txn(txn):
             txn.execute(
                 """
-                SELECT r.room_id, e.json as retention_content FROM rooms as r
-                LEFT OUTER JOIN current_state_events as s ON (
-                    r.room_id = s.room_id
-                    AND s.type = '%s'
+                SELECT rooms.room_id, events.json FROM rooms
+                LEFT OUTER JOIN current_state_events AS state ON (
+                    rooms.room_id = state.room_id
+                    AND state.type = '%s'
                 )
-                LEFT JOIN event_json as e ON (s.event_id = e.event_id);
+                LEFT JOIN event_json AS events ON (state.event_id = events.event_id)
+                WHERE rooms.room_id > ?
+                ORDER BY rooms.room_id ASC
+                LIMIT ?;
                 """ % EventTypes.Retention,
                 (last_room, batch_size)
             )
@@ -286,7 +290,7 @@ class RoomStore(RoomWorkerStore, SearchStore):
 
             self._background_update_progress_txn(
                 txn, "insert_room_retention", {
-                    "room_id": rows[-1]["insert_room_retention"],
+                    "room_id": rows[-1]["room_id"],
                 }
             )
 
