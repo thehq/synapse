@@ -36,6 +36,19 @@ CREATE INDEX event_search_ev_idx ON event_search(event_id);
 CREATE INDEX event_search_ev_ridx ON event_search(room_id);
 """
 
+COCKROACH_TABLE = """
+CREATE TABLE IF NOT EXISTS event_search (
+    event_id TEXT,
+    room_id TEXT,
+    sender TEXT,
+    key TEXT,
+    vector JSONB
+);
+
+CREATE INVERTED INDEX event_search_fts_idx ON event_search(vector);
+CREATE INDEX event_search_ev_idx ON event_search(event_id);
+CREATE INDEX event_search_ev_ridx ON event_search(room_id);
+"""
 
 SQLITE_TABLE = (
     "CREATE VIRTUAL TABLE event_search"
@@ -45,6 +58,9 @@ SQLITE_TABLE = (
 
 def run_create(cur, database_engine, *args, **kwargs):
     if isinstance(database_engine, PostgresEngine):
+        for statement in get_statements(POSTGRES_TABLE.splitlines()):
+            cur.execute(statement)
+    elif isinstance(database_engine, CockroachEngine):
         for statement in get_statements(POSTGRES_TABLE.splitlines()):
             cur.execute(statement)
     elif isinstance(database_engine, Sqlite3Engine):
