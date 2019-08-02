@@ -452,6 +452,9 @@ class Porter(object):
                 self.sqlite_config["name"], **self.sqlite_config["args"]
             )
 
+            if self.postgres_config["name"] == "cockroach":
+                postgres_config.update(name="psycopg2")
+
             postgres_db_pool = adbapi.ConnectionPool(
                 self.postgres_config["name"], **self.postgres_config["args"]
             )
@@ -530,13 +533,13 @@ class Porter(object):
                     if table not in ["schema_version", "applied_schema_deltas"]
                     and not table.startswith("sqlite_")
                 ],
-                consumeErrors=True,
+                consumeErrors=False,
             )
 
             # Step 4. Do the copying.
             self.progress.set_state("Copying to postgres")
             yield defer.gatherResults(
-                [self.handle_table(*res) for res in setup_res], consumeErrors=True
+                [self.handle_table(*res) for res in setup_res], consumeErrors=False
             )
 
             # Step 5. Do final post-processing
@@ -686,7 +689,7 @@ class Porter(object):
                 self._get_remaining_count_to_port(table, forward_chunk, backward_chunk),
                 self._get_already_ported_count(table),
             ],
-            consumeErrors=True,
+            consumeErrors=False,
         )
 
         remaining = int(remaining) if remaining else 0
@@ -932,8 +935,9 @@ if __name__ == "__main__":
     if "name" not in postgres_config:
         sys.stderr.write("Malformed database config: no 'name'")
         sys.exit(2)
-    if postgres_config["name"] != "psycopg2":
-        sys.stderr.write("Database must use 'psycopg2' connector.")
+
+    if postgres_config["name"] not in ["psycopg2", "cockroach"]:
+        sys.stderr.write("Database must use 'psycopg2' or 'cockroach'")
         sys.exit(3)
 
     def start(stdscr=None):
