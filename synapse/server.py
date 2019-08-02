@@ -408,6 +408,8 @@ class HomeServer(object):
 
     def build_db_pool(self):
         name = self.db_config["name"]
+        if name == "cockroach":
+            name = "psycopg2"
 
         return adbapi.ConnectionPool(
             name, cp_reactor=self.get_reactor(), **self.db_config.get("args", {})

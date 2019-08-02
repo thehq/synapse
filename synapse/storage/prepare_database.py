@@ -21,6 +21,7 @@ import os
 import re
 
 from synapse.storage.engines.postgres import PostgresEngine
+from synapse.storage.engines.cockroach import CockroachEngine
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +121,8 @@ def _setup_new_database(cur, database_engine):
 
     if isinstance(database_engine, PostgresEngine):
         specific = "postgres"
+    elif isinstance(database_engine, CockroachEngine):
+        specific = "cockroach"
     else:
         specific = "sqlite"
 
@@ -410,7 +413,13 @@ def get_statements(f):
 def executescript(txn, schema_path):
     with open(schema_path, "r") as f:
         for statement in get_statements(f):
-            txn.execute(statement)
+            try:
+                txn.execute(statement)
+            except BaseException as e:
+                print("!!! error executing statement:")
+                print(statement)
+                print(e)
+                raise(e)
 
 
 def _get_or_create_schema_state(txn, database_engine):

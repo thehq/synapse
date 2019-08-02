@@ -29,6 +29,8 @@ class DatabaseConfig(Config):
         name = self.database_config.get("name", None)
         if name == "psycopg2":
             pass
+        if name == "cockroach":
+            pass
         elif name == "sqlite3":
             self.database_config.setdefault("args", {}).update(
                 {"cp_min": 1, "cp_max": 1, "check_same_thread": False}
