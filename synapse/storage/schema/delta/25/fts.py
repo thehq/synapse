@@ -61,7 +61,7 @@ def run_create(cur, database_engine, *args, **kwargs):
         for statement in get_statements(POSTGRES_TABLE.splitlines()):
             cur.execute(statement)
     elif isinstance(database_engine, CockroachEngine):
-        for statement in get_statements(POSTGRES_TABLE.splitlines()):
+        for statement in get_statements(COCKROACH_TABLE.splitlines()):
             cur.execute(statement)
     elif isinstance(database_engine, Sqlite3Engine):
         cur.execute(SQLITE_TABLE)
