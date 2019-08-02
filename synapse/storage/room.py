@@ -21,6 +21,7 @@ from canonicaljson import json
 
 from twisted.internet import defer
 
+from synapse.api.constants import EventTypes
 from synapse.api.errors import StoreError
 from synapse.storage._base import SQLBaseStore
 from synapse.storage.search import SearchStore
@@ -222,6 +223,86 @@ class RoomWorkerStore(SQLBaseStore):
 
 
 class RoomStore(RoomWorkerStore, SearchStore):
+    def __init__(self, db_conn, hs):
+        super(RoomStore, self).__init__(db_conn, hs)
+
+        self.register_background_update_handler(
+            "users_set_deactivated_flag", self._background_insert_retention,
+        )
+
+    def _background_insert_retention(self, progress, batch_size):
+        """Retrieves a list of all rooms within a range and inserts an entry for each of
+        them into the room_retention table.
+        NULLs the property's columns if missing from the retention event in the room's
+        state (or NULLs all of them if there's no retention event in the room's state),
+        so that we fall back to the server's retention policy.
+        """
+
+        last_room = progress.get("room_id")
+
+        def _background_insert_retention_txn(txn):
+            txn.execute(
+                """
+                SELECT r.room_id, e.json as retention_content FROM rooms as r
+                LEFT OUTER JOIN current_state_events as s ON (
+                    r.room_id = s.room_id
+                    AND s.type = '%s'
+                )
+                LEFT JOIN event_json as e ON (s.event_id = e.event_id);
+                """ % EventTypes.Retention,
+                (last_room, batch_size)
+            )
+
+            rows = self.cursor_to_dict(txn)
+
+            if not rows:
+                return True
+
+            rows_processed_nb = 0
+
+            for row in rows:
+                if not row["json"]:
+                    retention_policy = {}
+                else:
+                    ev = json.loads(row["json"])
+                    retention_policy = json.dumps(ev["content"])
+
+                self._simple_insert_txn(
+                    txn=txn,
+                    table="room_retention",
+                    values={
+                        "room_id": row["room_id"],
+                        "min_lifetime": retention_policy.get("min_lifetime"),
+                        "max_lifetime": retention_policy.get("max_lifetime"),
+
+                    }
+                )
+
+                rows_processed_nb += 1
+
+            logger.info("Inserted %d rows into room_retention", rows_processed_nb)
+
+            self._background_update_progress_txn(
+                txn, "insert_room_retention", {
+                    "room_id": rows[-1]["insert_room_retention"],
+                }
+            )
+
+            if batch_size > len(rows):
+                return True
+            else:
+                return False
+
+        end = yield self.runInteraction(
+            "insert_room_retention",
+            _background_insert_retention_txn,
+        )
+
+        if end:
+            yield self._end_background_update("insert_room_retention")
+
+        defer.returnValue(batch_size)
+
     @defer.inlineCallbacks
     def store_room(self, room_id, room_creator_user_id, is_public):
         """Stores a room.
@@ -456,6 +537,20 @@ class RoomStore(RoomWorkerStore, SearchStore):
                 " VALUES (?, ?, ?)" % {"key": key}
             )
             txn.execute(sql, (event.event_id, event.room_id, event.content[key]))
+
+    def _update_retention_policy_for_room_txn(self, txn, event):
+        if hasattr(event, "content") and "max_lifetime" in event.content:
+            self._simple_update_one_txn(
+                txn=txn,
+                table="room_retention",
+                keyvalues={
+                    "room_id": event.room_id,
+                },
+                updatevalues={
+                    "min_lifetime": event.content.get("min_lifetime"),
+                    "max_lifetime": event.content.get("max_lifetime"),
+                },
+            )
 
     def add_event_report(
         self, room_id, event_id, user_id, reason, content, received_ts
