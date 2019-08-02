@@ -18,6 +18,7 @@ _trial_temp*/
 /*.pid
 /*.signing.key
 /env/
+/venv/
 /homeserver*.yaml
 /media_store/
 /uploads

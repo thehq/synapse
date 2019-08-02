@@ -33,6 +33,8 @@ class DatabaseConfig(Config):
             self.database_config.setdefault("args", {}).update(
                 {"cp_min": 1, "cp_max": 1, "check_same_thread": False}
             )
+        elif name == "cockroach":
+            pass
         else:
             raise RuntimeError("Unsupported database type '%s'" % (name,))
 
